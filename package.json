@@ -1,0 +1,23 @@
+{
+  "name": "bbsniper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itopstack/BBSniper.git"
+  },
+  "author": "Kittisak Phetrungnapha",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/itopstack/BBSniper/issues"
+  },
+  "homepage": "https://github.com/itopstack/BBSniper#readme",
+  "dependencies": {
+    "dotenv": "^16.0.1",
+    "ethers": "^5.6.9"
+  }
+}
