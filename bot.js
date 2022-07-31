@@ -15,28 +15,31 @@ const node = process.env.NODE;
 
 const provider = new ethers.providers.WebSocketProvider(node);
 const wallet = new ethers.Wallet(privateKey);
-const account = wallet.connect(provider);
-const recipient = account.address;
-const minBnbForPair = 10;
-const myGasPrice = ethers.utils.parseUnits("5", "gwei");
+const signer = wallet.connect(provider);
+const recipient = signer.address;
+const minBnbForPair = 50;
+const myGasPrice = ethers.utils.parseUnits("6", "gwei");
+const myGasLimit = 300000;
 const profitXAmount = 2;
+const investmentBnb = 0.01;
+const slippagePercentage = 5;
 
 const factory = new ethers.Contract(
   addresses.factory,
   [
     "event PairCreated(address indexed token0, address indexed token1, address pair, uint)",
   ],
-  account
+  signer
 );
 
 const router = new ethers.Contract(
   addresses.router,
   [
-    "function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts)",
-    "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)",
-    "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
+    "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)",
+    "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
+    "function swapExactTokensForTokensSupportingFeeOnTransferTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
   ],
-  account
+  signer
 );
 
 const erc = new ethers.Contract(
@@ -51,15 +54,13 @@ const erc = new ethers.Contract(
       type: "function",
     },
   ],
-  account
+  signer
 );
 
 const tokenAbi = [
-  "function approve(address spender, uint amount) public returns(bool)",
+  "function approve(address spender, uint amount) public returns (bool)",
   "function balanceOf(address account) external view returns (uint256)",
-  "function decimals() external view returns (uint8)",
   "event Transfer(address indexed from, address indexed to, uint amount)",
-  "function transfer(address to, uint amount) returns (bool)",
 ];
 
 let isSniping = false;
@@ -80,10 +81,10 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     `);
 
   const pairBNBvalue = await erc.balanceOf(addressPair);
-  const jmlBnb = await ethers.utils.formatEther(pairBNBvalue);
-  console.log(`Pair value BNB: ${jmlBnb}`);
+  const poolBnb = await ethers.utils.formatEther(pairBNBvalue);
+  console.log(`Pair value BNB: ${poolBnb}`);
 
-  if (jmlBnb < minBnbForPair) {
+  if (poolBnb < minBnbForPair) {
     console.log("Pool has BNB value less than minimum required BNB. Skip it.");
     return;
   }
@@ -104,7 +105,6 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     return;
   }
 
-  console.log("Checking honey pot...");
   const response = await fetch(
     `https://aywt3wreda.execute-api.eu-west-1.amazonaws.com/default/IsHoneypot?chain=bsc2&token=${sellToken}`
   );
@@ -114,10 +114,19 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     return;
   }
 
-  const amountIn = ethers.utils.parseUnits("0.001", "ether"); //ether is the measurement, not the coin
-  const amounts = await router.getAmountsOut(amountIn, [buyToken, sellToken]);
+  const amountIn = ethers.utils.parseUnits(`${investmentBnb}`, "ether"); //ether is the measurement, not the coin
 
-  const amountOutMin = amounts[1].sub(amounts[1].div(10)); // math for Big numbers in JS
+  let amounts;
+  try {
+    amounts = await router.getAmountsOut(amountIn, [buyToken, sellToken]);
+  } catch (err) {
+    console.log(err);
+    return;
+  }
+
+  const amountOutMin = amounts[1].sub(
+    amounts[1].div(100).mul(slippagePercentage)
+  );
   console.log(`
     ~~~~~~~~~~~~~~~~~~~~
     Buying new token
@@ -126,38 +135,66 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     sellToken: ${amountOutMin.toString()} ${sellToken}
     `);
 
-  const tx = await router.swapExactTokensForTokens(
-    amountIn,
-    amountOutMin,
-    [buyToken, sellToken],
-    recipient,
-    Date.now() + 1000 * 60 * 5 //5 minutes
-  );
+  isSniping = true;
+
+  let tx;
+  try {
+    tx = await router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+      amountIn,
+      amountOutMin,
+      [buyToken, sellToken],
+      recipient,
+      Date.now() + 1000 * 60 * 5, //5 minutes
+      {
+        gasLimit: myGasLimit,
+        gasPrice: myGasPrice,
+      }
+    );
+  } catch (err) {
+    console.log(err);
+    isSniping = false;
+    return;
+  }
 
   const receipt = await tx.wait();
   console.log("Buy transaction receipt");
   console.log(receipt);
 
-  isSniping = true;
-
-  const contract = new ethers.Contract(sellToken, tokenAbi, account);
-
+  const contract = new ethers.Contract(sellToken, tokenAbi, signer);
   const valueToApprove = ethers.utils.parseUnits("0", "ether");
-  const approvedTx = await contract.approve(addresses.router, valueToApprove, {
-    gasPrice: myGasPrice,
-    gasLimit: 210000,
-  });
 
+  let approvedTx;
   console.log("Approving sell token...");
+
+  try {
+    approvedTx = await contract.approve(addresses.router, valueToApprove, {
+      gasPrice: myGasPrice,
+      gasLimit: myGasLimit,
+    });
+  } catch (err) {
+    console.log(err);
+    isSniping = false;
+    return;
+  }
+
   const approvedReceipt = await approvedTx.wait();
+
   console.log("Approved transaction receipt");
   console.log(approvedReceipt);
+  console.log("Check profit...");
 
-  contract.on("Transfer", async (from, to, value, event) => {
-    console.log("Check profit...");
+  const transferEventName = "Transfer";
+  contract.on(transferEventName, async (from, to, value, event) => {
+    const balance = await contract.balanceOf(recipient);
 
-    const bal = await contract.balanceOf(recipient);
-    const amount = await router.getAmountsOut(bal, [sellToken, buyToken]);
+    let amount;
+    try {
+      amount = await router.getAmountsOut(balance, [sellToken, buyToken]);
+    } catch (err) {
+      console.log(err);
+      return;
+    }
+
     const profitDesired = amountIn.mul(profitXAmount);
     const currentValue = amount[1];
 
@@ -171,24 +208,36 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     if (currentValue.gte(profitDesired)) {
       console.log("Selling token to take profit...");
 
-      const amountsOutMin = currentValue.sub(currentValue.div(10));
-      const tx = await router.swapExactTokensForETH(
-        amount[0],
-        amountsOutMin,
-        [sellToken, buyToken],
-        recipient,
-        Date.now() + 1000 * 60 * 5,
-        {
-          gasPrice: myGasPrice,
-          gasLimit: 210000,
-        }
+      const amountsOutMin = currentValue.sub(
+        currentValue.div(100).mul(slippagePercentage)
       );
+
+      let tx;
+      try {
+        tx = await router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+          amount[0],
+          amountsOutMin,
+          [sellToken, buyToken],
+          recipient,
+          Date.now() + 1000 * 60 * 5,
+          {
+            gasPrice: myGasPrice,
+            gasLimit: myGasLimit,
+          }
+        );
+      } catch (err) {
+        console.log(err);
+        return;
+      }
 
       const receipt = await tx.wait();
       console.log("Sell Transaction receipt");
       console.log(receipt);
 
-      process.exit();
+      contract.removeListener(transferEventName, () => {
+        console.log("Unsubscribed current contract before start over again");
+        isSniping = false;
+      });
     }
   });
 });
