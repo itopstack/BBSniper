@@ -18,6 +18,7 @@
   "homepage": "https://github.com/itopstack/BBSniper#readme",
   "dependencies": {
     "dotenv": "^16.0.1",
-    "ethers": "^5.6.9"
+    "ethers": "^5.6.9",
+    "node-fetch": "^2.6.7"
   }
 }
