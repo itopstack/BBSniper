@@ -96,7 +96,6 @@ const subscription = web3.eth
 
         if (data.method == "addLiquidityETH") {
           console.log("Found target liquidity. Perform more checking...");
-          subscription.unsubscribe();
 
           const pair = await factory.getPair(addresses.WBNB, data.inputs[0]);
           const pairContract = new ethers.Contract(
@@ -166,6 +165,8 @@ const subscription = web3.eth
             console.log("Token is honey pot. Skip it.");
             return;
           }
+
+          subscription.unsubscribe();
 
           const amountIn = ethers.utils.parseUnits(`${investmentBnb}`, "ether");
           const amounts = await router.getAmountsOut(amountIn, [
