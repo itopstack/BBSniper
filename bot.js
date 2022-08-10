@@ -1,8 +1,6 @@
 const ethers = require("ethers");
-const dotenv = require("dotenv");
+require("dotenv").config();
 const fetch = require("node-fetch");
-
-dotenv.config();
 
 const addresses = {
   WBNB: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
@@ -12,17 +10,16 @@ const addresses = {
 
 const privateKey = process.env.PRIVATE_KEY;
 const node = process.env.NODE;
-
 const provider = new ethers.providers.WebSocketProvider(node);
 const wallet = new ethers.Wallet(privateKey);
 const signer = wallet.connect(provider);
 const recipient = signer.address;
-const minBnbForPair = 50;
+const minBnbForPair = 100;
 const myGasPrice = ethers.utils.parseUnits("6", "gwei");
 const myGasLimit = 300000;
 const profitXAmount = 2;
 const investmentBnb = 0.01;
-const slippagePercentage = 5;
+const slippagePercentage = 1;
 
 const factory = new ethers.Contract(
   addresses.factory,
@@ -35,32 +32,23 @@ const factory = new ethers.Contract(
 const router = new ethers.Contract(
   addresses.router,
   [
-    "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)",
-    "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
-    "function swapExactTokensForTokensSupportingFeeOnTransferTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
+    "function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts)",
+    "function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)",
+    "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
   ],
   signer
 );
 
 const erc = new ethers.Contract(
   addresses.WBNB,
-  [
-    {
-      constant: true,
-      inputs: [{ name: "_owner", type: "address" }],
-      name: "balanceOf",
-      outputs: [{ name: "balance", type: "uint256" }],
-      payable: false,
-      type: "function",
-    },
-  ],
+  ["function balanceOf(address _owner) public view returns (uint256 balance)"],
   signer
 );
 
 const tokenAbi = [
   "function approve(address spender, uint amount) public returns (bool)",
-  "function balanceOf(address account) external view returns (uint256)",
-  "event Transfer(address indexed from, address indexed to, uint amount)",
+  "function balanceOf(address _owner) public view returns (uint256 balance)",
+  "event Transfer(address indexed _from, address indexed _to, uint256 _value)",
 ];
 
 let isSniping = false;
@@ -80,15 +68,6 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     addressPair: ${addressPair}
     `);
 
-  const pairBNBvalue = await erc.balanceOf(addressPair);
-  const poolBnb = await ethers.utils.formatEther(pairBNBvalue);
-  console.log(`Pair value BNB: ${poolBnb}`);
-
-  if (poolBnb < minBnbForPair) {
-    console.log("Pool has BNB value less than minimum required BNB. Skip it.");
-    return;
-  }
-
   // This block ensures we pay with WBNB
   let buyToken, sellToken;
   if (token0 === addresses.WBNB) {
@@ -105,6 +84,15 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     return;
   }
 
+  const pairBNBvalue = await erc.balanceOf(addressPair);
+  const poolBnb = ethers.utils.formatEther(pairBNBvalue);
+  console.log(`Pair value BNB: ${poolBnb}`);
+
+  if (poolBnb < minBnbForPair) {
+    console.log("Pool has BNB value less than minimum required BNB. Skip it.");
+    return;
+  }
+
   const response = await fetch(
     `https://aywt3wreda.execute-api.eu-west-1.amazonaws.com/default/IsHoneypot?chain=bsc2&token=${sellToken}`
   );
@@ -114,87 +102,61 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     return;
   }
 
-  const amountIn = ethers.utils.parseUnits(`${investmentBnb}`, "ether"); //ether is the measurement, not the coin
-
-  let amounts;
-  try {
-    amounts = await router.getAmountsOut(amountIn, [buyToken, sellToken]);
-  } catch (err) {
-    console.log(err);
-    return;
-  }
-
+  const amountIn = ethers.utils.parseUnits(`${investmentBnb}`, "ether");
+  const amounts = await router.getAmountsOut(amountIn, [buyToken, sellToken]);
   const amountOutMin = amounts[1].sub(
     amounts[1].div(100).mul(slippagePercentage)
   );
+
   console.log(`
     ~~~~~~~~~~~~~~~~~~~~
     Buying new token
     ~~~~~~~~~~~~~~~~~~~~
-    buyToken: ${amountIn.toString()} ${buyToken} (WBNB)
-    sellToken: ${amountOutMin.toString()} ${sellToken}
+    buyToken: ${amountIn.toString()} ${buyToken} (WBNB in wei)
+    sellToken: ${amountOutMin.toString()} ${sellToken} in wei
     `);
 
   isSniping = true;
 
-  let tx;
-  try {
-    tx = await router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-      amountIn,
-      amountOutMin,
-      [buyToken, sellToken],
-      recipient,
-      Date.now() + 1000 * 60 * 5, //5 minutes
-      {
-        gasLimit: myGasLimit,
-        gasPrice: myGasPrice,
-      }
-    );
-  } catch (err) {
-    console.log(err);
-    isSniping = false;
-    return;
-  }
+  const tx = await router.swapExactETHForTokens(
+    amountOutMin,
+    [buyToken, sellToken],
+    recipient,
+    Date.now() + 1000 * 60 * 5, //5 minutes
+    {
+      value: amountIn,
+      gasLimit: myGasLimit,
+      gasPrice: myGasPrice,
+    }
+  );
 
   const receipt = await tx.wait();
   console.log("Buy transaction receipt");
   console.log(receipt);
 
   const contract = new ethers.Contract(sellToken, tokenAbi, signer);
-  const valueToApprove = ethers.utils.parseUnits("0", "ether");
+  const valueToApprove = ethers.utils.parseUnits(
+    `${Number.MAX_SAFE_INTEGER}`,
+    "ether"
+  );
 
-  let approvedTx;
   console.log("Approving sell token...");
 
-  try {
-    approvedTx = await contract.approve(addresses.router, valueToApprove, {
-      gasPrice: myGasPrice,
-      gasLimit: myGasLimit,
-    });
-  } catch (err) {
-    console.log(err);
-    isSniping = false;
-    return;
-  }
+  const approvedTx = await contract.approve(addresses.router, valueToApprove, {
+    gasPrice: myGasPrice,
+    gasLimit: myGasLimit,
+  });
 
   const approvedReceipt = await approvedTx.wait();
-
   console.log("Approved transaction receipt");
   console.log(approvedReceipt);
+
   console.log("Check profit...");
 
   const transferEventName = "Transfer";
-  contract.on(transferEventName, async (from, to, value, event) => {
+  contract.on(transferEventName, async (from, to, value) => {
     const balance = await contract.balanceOf(recipient);
-
-    let amount;
-    try {
-      amount = await router.getAmountsOut(balance, [sellToken, buyToken]);
-    } catch (err) {
-      console.log(err);
-      return;
-    }
-
+    const amount = await router.getAmountsOut(balance, [sellToken, buyToken]);
     const profitDesired = amountIn.mul(profitXAmount);
     const currentValue = amount[1];
 
@@ -212,23 +174,17 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
         currentValue.div(100).mul(slippagePercentage)
       );
 
-      let tx;
-      try {
-        tx = await router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-          amount[0],
-          amountsOutMin,
-          [sellToken, buyToken],
-          recipient,
-          Date.now() + 1000 * 60 * 5,
-          {
-            gasPrice: myGasPrice,
-            gasLimit: myGasLimit,
-          }
-        );
-      } catch (err) {
-        console.log(err);
-        return;
-      }
+      const tx = await router.swapExactTokensForETH(
+        amount[0],
+        amountsOutMin,
+        [sellToken, buyToken],
+        recipient,
+        Date.now() + 1000 * 60 * 5,
+        {
+          gasPrice: myGasPrice,
+          gasLimit: myGasLimit,
+        }
+      );
 
       const receipt = await tx.wait();
       console.log("Sell Transaction receipt");
