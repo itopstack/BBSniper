@@ -14,12 +14,13 @@ const provider = new ethers.providers.WebSocketProvider(node);
 const wallet = new ethers.Wallet(privateKey);
 const signer = wallet.connect(provider);
 const recipient = signer.address;
-const minBnbForPair = 100;
-const myGasPrice = ethers.utils.parseUnits("6", "gwei");
-const myGasLimit = 300000;
-const profitXAmount = 2;
-const investmentBnb = 0.01;
-const slippagePercentage = 1;
+const targetAddress = process.env.TARGET;
+//const minBnbForPair = 100;
+const myGasPrice = ethers.utils.parseUnits(`${process.env.GAS_PRICE}`, "gwei");
+const myGasLimit = process.env.GAS_LIMIT;
+const profitXAmount = process.env.PROFIT;
+const investmentBnb = process.env.INVESTMENT;
+const slippagePercentage = process.env.SLIPPAGE;
 
 const factory = new ethers.Contract(
   addresses.factory,
@@ -39,11 +40,13 @@ const router = new ethers.Contract(
   signer
 );
 
+/*
 const erc = new ethers.Contract(
   addresses.WBNB,
   ["function balanceOf(address _owner) public view returns (uint256 balance)"],
   signer
 );
+*/
 
 const tokenAbi = [
   "function approve(address spender, uint amount) public returns (bool)",
@@ -51,11 +54,17 @@ const tokenAbi = [
   "event Transfer(address indexed _from, address indexed _to, uint256 _value)",
 ];
 
-let isSniping = false;
+//let isSniping = false;
 
+console.log("Seaching target pair...");
 factory.on("PairCreated", async (token0, token1, addressPair) => {
-  if (isSniping) {
-    console.log("Already snipe some token. Wait until that task finished");
+  // if (isSniping) {
+  //   console.log("Already snipe some token. Wait until that task finished");
+  //   return;
+  // }
+
+  if (token0 !== targetAddress || token1 !== targetAddress) {
+    console.log("Waiting target address to be founded");
     return;
   }
 
@@ -84,6 +93,7 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     return;
   }
 
+  /*
   const pairBNBvalue = await erc.balanceOf(addressPair);
   const poolBnb = ethers.utils.formatEther(pairBNBvalue);
   console.log(`Pair value BNB: ${poolBnb}`);
@@ -101,6 +111,7 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     console.log("Token is honey pot. Skip it.");
     return;
   }
+  */
 
   const amountIn = ethers.utils.parseUnits(`${investmentBnb}`, "ether");
   const amounts = await router.getAmountsOut(amountIn, [buyToken, sellToken]);
@@ -116,7 +127,7 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
     sellToken: ${amountOutMin.toString()} ${sellToken} in wei
     `);
 
-  isSniping = true;
+  // isSniping = true;
 
   const tx = await router.swapExactETHForTokens(
     amountOutMin,
@@ -190,10 +201,12 @@ factory.on("PairCreated", async (token0, token1, addressPair) => {
       console.log("Sell Transaction receipt");
       console.log(receipt);
 
-      contract.removeListener(transferEventName, () => {
-        console.log("Unsubscribed current contract before start over again");
-        isSniping = false;
-      });
+      process.exit();
+
+      // contract.removeListener(transferEventName, () => {
+      //   console.log("Unsubscribed current contract before start over again");
+      //   isSniping = false;
+      // });
     }
   });
 });
