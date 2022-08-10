@@ -147,7 +147,7 @@ const subscription = web3.eth
             return;
           }
 
-          const pairBNBvalue = await erc.balanceOf(addressPair);
+          const pairBNBvalue = await erc.balanceOf(pair);
           const poolBnb = ethers.utils.formatEther(pairBNBvalue);
           console.log(`Pair value BNB: ${poolBnb}`);
 
