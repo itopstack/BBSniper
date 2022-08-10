@@ -1,6 +1,6 @@
 const ethers = require("ethers");
 require("dotenv").config();
-//const fetch = require("node-fetch");
+const fetch = require("node-fetch");
 const Web3 = require("web3");
 const InputDataDecoder = require("ethereum-input-data-decoder");
 
@@ -17,7 +17,7 @@ const wallet = new ethers.Wallet(privateKey);
 const signer = wallet.connect(provider);
 const recipient = signer.address;
 const targetAddress = process.env.TARGET;
-//const minBnbForPair = 100;
+const minBnbForPair = process.env.MIN_POOL_BNB;
 const myGasPrice = ethers.utils.parseUnits(`${process.env.GAS_PRICE}`, "gwei");
 const myGasLimit = process.env.GAS_LIMIT;
 const profitXAmount = process.env.PROFIT;
@@ -43,11 +43,11 @@ const router = new ethers.Contract(
   signer
 );
 
-// const erc = new ethers.Contract(
-//   addresses.WBNB,
-//   ["function balanceOf(address _owner) public view returns (uint256 balance)"],
-//   signer
-// );
+const erc = new ethers.Contract(
+  addresses.WBNB,
+  ["function balanceOf(address _owner) public view returns (uint256 balance)"],
+  signer
+);
 
 const tokenAbi = [
   "function approve(address spender, uint amount) public returns (bool)",
@@ -147,6 +147,26 @@ const subscription = web3.eth
 
           if (typeof buyToken === "undefined") {
             console.log("Neither token is WBNB and we cannot purchase");
+            return;
+          }
+
+          const pairBNBvalue = await erc.balanceOf(addressPair);
+          const poolBnb = ethers.utils.formatEther(pairBNBvalue);
+          console.log(`Pair value BNB: ${poolBnb}`);
+
+          if (poolBnb < minBnbForPair) {
+            console.log(
+              "Pool has BNB value less than minimum required BNB. Skip it."
+            );
+            return;
+          }
+
+          const response = await fetch(
+            `https://aywt3wreda.execute-api.eu-west-1.amazonaws.com/default/IsHoneypot?chain=bsc2&token=${sellToken}`
+          );
+          const json = await response.json();
+          if (json.IsHoneypot) {
+            console.log("Token is honey pot. Skip it.");
             return;
           }
 
