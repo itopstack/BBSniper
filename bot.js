@@ -78,12 +78,11 @@ const abiDecoder = new InputDataDecoder([
 const ws = new Web3.providers.WebsocketProvider(node);
 const web3 = new Web3(ws);
 
+console.log("Seaching target liquidity...");
 const subscription = web3.eth
   .subscribe("pendingTransactions", function (error, result) {})
   .on("data", function (transaction) {
     web3.eth.getTransaction(transaction).then(async (tx) => {
-      console.log("Seaching target liquidity...");
-
       if (
         tx != null &&
         tx.to == web3.utils.toChecksumAddress(addresses.router)
@@ -95,10 +94,8 @@ const subscription = web3.eth
           return;
         }
 
-        if (
-          data.method == "addLiquidityETH" &&
-          data.inputs[0] == targetAddress
-        ) {
+        if (data.method == "addLiquidityETH") {
+          console.log("Found target liquidity. Perform more checking...");
           subscription.unsubscribe();
 
           const pair = await factory.getPair(addresses.WBNB, data.inputs[0]);
@@ -200,8 +197,7 @@ const subscription = web3.eth
           );
 
           const receipt = await tx.wait();
-          console.log("Buy transaction receipt");
-          console.log(receipt);
+          console.log(`Buy transaction hash: ${receipt.transactionHash}`);
 
           const contract = new ethers.Contract(sellToken, tokenAbi, signer);
           const valueToApprove = ethers.utils.parseUnits(
@@ -221,8 +217,9 @@ const subscription = web3.eth
           );
 
           const approvedReceipt = await approvedTx.wait();
-          console.log("Approved transaction receipt");
-          console.log(approvedReceipt);
+          console.log(
+            `Approved transaction hash: ${approvedReceipt.transactionHash}`
+          );
 
           console.log("Check profit...");
 
@@ -263,8 +260,7 @@ const subscription = web3.eth
               );
 
               const receipt = await tx.wait();
-              console.log("Sell Transaction receipt");
-              console.log(receipt);
+              console.log(`Sell Transaction hash: ${receipt.transactionHash}`);
 
               process.exit();
             }
